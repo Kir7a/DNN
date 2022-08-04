@@ -1,0 +1,255 @@
+from turtle import forward
+import torch
+import numpy as np
+import torch.nn.functional as F
+from src.diffraction import DiffractiveLayer, Lens
+from tqdm import tqdm
+from copy import deepcopy
+
+DETECTOR_POS = [
+    (46 , 66, 46 , 66), (46 , 66, 93 , 113), (46 , 66, 140 , 160),
+    (85 , 105, 46 , 66), (85 , 105, 78 , 98), (85 , 105, 109 , 129),
+    (85 , 105, 140 , 160), (125 , 145, 46 , 66), (125 , 145, 93 , 113),
+    (125 , 145, 140 , 160)
+  ]
+
+class Trainer():
+    '''
+    Класс для тренировки оптической нейронной сети. 
+    param model: Модель нейронной сети для обучения
+    param detector_pos: список позиций детекторов для классификации
+    param padding: число нулевых пикселей, которое нужно добавить к изображению на вход нейронной сети.
+        Если число пикселей изображения совпадает с числом пикселей в фазовой маске нейронной сети, то padding = 0
+    param device: где будет проходить обучение сети 'cpu'/'cuda'
+    '''
+    def __init__(self,model, detector_pos = DETECTOR_POS, padding = 58, device = 'cpu'):
+        self.detector_pos = detector_pos
+        self.model = model
+        self.padding = padding
+        self.device = device
+
+    def detector_region(self, x):
+        '''
+        Подсчет интенсивности, которая приходится на каждый детектор в конце оптической нейронной сети.
+        param x: распределение интенсивности на выходе нейронной сети
+        return: тензор с суммарной интенсивностью, приходящейся на каждый детектор
+        '''
+        detectors_list = []
+        full_int = x.sum(dim=(1,2))
+        for det_x0, det_x1, det_y0, det_y1 in self.detector_pos:
+            detectors_list.append((x[:, det_x0 : det_x1+1, det_y0 : det_y1+1].sum(dim=(1, 2))/full_int).unsqueeze(-1))
+        return torch.cat(detectors_list, dim = 1)
+
+    def epoch_step(self, batch):
+        '''
+        Обработка одного батча в процессе тренировки.
+        param batch: (imgs, labels) батч с изображениями и их метками
+        '''
+        images, labels = batch
+        images=images.to(self.device)
+        images = F.pad(torch.squeeze(images), pad=(self.padding, self.padding, self.padding, self.padding))
+        labels=labels.to(self.device)
+            
+        out_img, _ = self.model(images)
+        
+        out_label = self.detector_region(out_img)
+        _, predicted = torch.max(out_label.data, 1)
+        correct = (predicted == labels).sum().item()
+        total = labels.size(0)
+        loss = self.loss_function(out_img, labels)
+        return loss, correct, total
+
+    def train(self, loss_function, optimizer, trainloader, testloader, epochs =10):
+        '''
+        Функция для тренировки сети.
+        '''
+        hist = {'train loss':[], 
+                'test loss': [], 
+                'train accuracy': [],
+                'test accuracy': []}
+        best_acc=0
+        self.loss_function = loss_function
+        for epoch in range(epochs):
+            ep_loss = 0
+            self.model.train()
+            correct = 0
+            total = 0
+            for batch in tqdm(trainloader):
+                loss, batch_correct, batch_total =  self.epoch_step(batch) 
+                ep_loss += loss.item()
+                correct += batch_correct
+                total += batch_total
+
+                optimizer.zero_grad()
+                loss.backward() 
+                optimizer.step()
+
+            hist['train loss'].append(ep_loss /len(trainloader))
+            hist['train accuracy'].append(correct /total)
+        
+            ep_loss = 0
+            self.model.eval()
+            correct = 0
+            total = 0
+            with torch.no_grad():
+                for batch in tqdm(testloader):
+                    loss, batch_correct, batch_total =  self.epoch_step(batch)
+                    ep_loss += loss.item()
+                    correct += batch_correct
+                    total += batch_total
+            hist['test loss'].append(ep_loss /len(testloader))
+            hist['test accuracy'].append(correct /total)
+        
+        if hist['test accuracy'][-1]>best_acc:
+            best_acc = hist['test accuracy']
+            best_model=deepcopy(self.model)
+
+        print(f"Epoch={epoch} train loss={hist['train loss'][epoch]:.4}, test loss={hist['test loss'][epoch]:.4}")
+        print(f"train acc={hist['train accuracy'][epoch]:.4}, test acc={hist['test accuracy'][epoch]:.4}")
+        print("-----------------------")
+        
+        return hist, best_model
+
+class MaskLayer(torch.nn.Module):
+
+    def __init__(self, distance_before_mask = None, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, include_amplitude = False):
+        super(MaskLayer, self).__init__()
+
+        self.diffractive_layer = None
+        if distance_before_mask is not None:
+            self.diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, distance_before_mask)
+
+        self.phase = torch.nn.Parameter(torch.zeros([N_pixels, N_pixels], dtype = torch.float32))
+        if include_amplitude:
+            self.amplitude = torch.nn.Parameter(torch.zeros([N_pixels, N_pixels], dtype = torch.float32) + 1)
+        self.phase_amp_mod = include_amplitude
+        self.N_pixels = N_pixels
+        self.pixel_size = pixel_size
+        self.wl = wl
+
+    def forward(self, E):
+        out = E
+        if self.diffractive_layer is not None:
+            out = self.diffractive_layer(out)
+        constr_phase = 2*np.pi*torch.sigmoid(self.phase)
+        modulation = torch.cos(constr_phase)+1j*torch.sin(constr_phase)
+        if self.phase_amp_mod:
+            constr_amp = F.relu(self.amplitude)/F.relu(self.amplitude).max()
+            modulation = constr_amp * modulation
+        out = modulation * out
+        return out
+
+
+
+class DNN(torch.nn.Module):
+    """
+    phase only modulation
+    """
+    def __init__(self, num_layers=5, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, distance = 0.01):
+
+        super(DNN, self).__init__()
+        
+        self.phase = [torch.nn.Parameter(torch.from_numpy(np.random.random(size=(N_pixels, N_pixels)).astype('float32')-0.5)) for _ in range(num_layers)]
+        for i in range(num_layers):
+            self.register_parameter("phase" + "_" + str(i), self.phase[i])
+        self.diffractive_layers = torch.nn.ModuleList([DiffractiveLayer(wl, N_pixels, pixel_size, distance) for _ in range(num_layers)])
+        self.last_diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, distance)
+
+    def forward(self, x):
+        # x (batch, N_pixels, N_pixels)
+        for index, layer in enumerate(self.diffractive_layers):
+            temp = layer(x)
+            #constr_phase = self.phase[index]#
+            constr_phase = 2*np.pi*torch.sigmoid(self.phase[index])
+            exp_j_phase = torch.exp(1j*constr_phase)#torch.cos(constr_phase)+1j*torch.sin(constr_phase)
+            x = temp * exp_j_phase
+        x = self.last_diffractive_layer(x)
+        x_abs = torch.abs(x)**2
+        output = self.detector_region(x_abs)
+        return output, x_abs
+
+# Архитектура Фурье дифракционной сети
+class Fourier_DNN(torch.nn.Module):
+    """
+    phase only modulation
+    """
+    def __init__(self, num_layers=5, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, distance = 0.01, lens_focus = 10e-2):
+
+        super(Fourier_DNN, self).__init__()
+        
+        #self.phase = [torch.nn.Parameter(torch.from_numpy(np.random.random(size=(N_pixels, N_pixels)).astype('float32')-0.5)) for _ in range(num_layers)]
+        self.phase = [torch.nn.Parameter(torch.from_numpy(np.zeros((N_pixels, N_pixels)).astype('float32'))) for _ in range(num_layers)]
+        for i in range(num_layers):
+            self.register_parameter("phase" + "_" + str(i), self.phase[i])
+
+        coord_limit = (N_pixels//2)*pixel_size 
+        mesh = np.arange(-coord_limit, coord_limit, pixel_size)
+        x, y = np.meshgrid(mesh, mesh)    
+        self.lens_phase = torch.tensor(np.exp(-1j*np.pi/(wl*2*lens_focus) * (x**2 + y**2)))
+        self.first_diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, lens_focus-distance)
+        self.diffractive_layers = torch.nn.ModuleList([DiffractiveLayer(wl, N_pixels, pixel_size, distance) for _ in range(0,num_layers)])
+        self.double_f_layer = DiffractiveLayer(wl, N_pixels, pixel_size, 2*lens_focus)
+        self.single_f_layer = DiffractiveLayer(wl, N_pixels, pixel_size, lens_focus)
+
+    def forward(self, x):
+        # x (batch, 200, 200)
+        outputs = []
+        outputs.append(x)
+        #x = self.double_f_layer(x)
+        x = self.single_f_layer(x)
+        outputs.append(x)
+        x = x*self.lens_phase
+        x = self.first_diffractive_layer(x)
+        for index, layer in enumerate(self.diffractive_layers):
+            temp = layer(x)
+            outputs.append(x)
+            constr_phase = np.pi*torch.sigmoid(self.phase[index])
+            exp_j_phase = torch.exp(1j*constr_phase)
+            x = temp * exp_j_phase
+        x = self.single_f_layer(x)
+        outputs.append(x)
+        x = x*self.lens_phase
+        #x = self.double_f_layer(x)
+        x = self.single_f_layer(x)
+        outputs.append(x)
+        # x_abs (batch, 200, 200)
+        x_abs = torch.abs(x)**2
+        # output = self.detector_region(x_abs)
+        # return output, x_abs, outputs
+        return x_abs, outputs
+
+class new_Fourier_DNN(torch.nn.Module):
+    """
+    Fourier Diffractive Neural Network
+    """
+    def __init__(self, num_layers=5, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, distance = 0.01, lens_focus = 10e-2):
+
+        super(new_Fourier_DNN, self).__init__()
+        self.lens_diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, lens_focus)
+        self.lens = Lens(lens_focus, wl, N_pixels, pixel_size)
+
+        self.mask_layers = torch.nn.ModuleList([MaskLayer(distance_before_mask = distance, 
+                                                          wl = wl, 
+                                                          N_pixels = N_pixels, 
+                                                          pixel_size = pixel_size, 
+                                                          include_amplitude = True) for _ in range(0,num_layers)])
+
+    def forward(self, E):
+        outputs = []
+        outputs.append(E)
+        E = self.lens_diffractive_layer(E)
+        E = self.lens(E)
+        outputs.append(E)
+        for layer in self.mask_layers:
+            E = layer(E)
+            outputs.append(E)
+        E = self.lens_diffractive_layer(E)
+        E = self.lens(E)
+        outputs.append(E)
+        E = self.lens_diffractive_layer(E)
+        E_abs = torch.abs(E)**2
+        return E_abs, outputs
+
+
+
+
