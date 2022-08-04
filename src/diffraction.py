@@ -4,7 +4,7 @@ import torch
 
 class DiffractiveLayer(torch.nn.Module):
 
-    def __init__(self, λ = 532e-9, N_pixels = 400, pixel_size = 20e-6, dz = 0.01, device = 'cpu'):
+    def __init__(self, λ = 532e-9, N_pixels = 400, pixel_size = 20e-6, dz = 0.01):
         super(DiffractiveLayer, self).__init__()
 
         fx = np.fft.fftshift(np.fft.fftfreq(N_pixels, d = pixel_size))
@@ -16,7 +16,7 @@ class DiffractiveLayer(torch.nn.Module):
         #Calculate the propagating and the evanescent (complex) modes
         tmp = np.sqrt(np.abs(argument))
         kz = torch.tensor(np.where(argument >= 0, tmp, 1j*tmp))
-        self.phase = torch.exp(1j * kz * dz).to(device)
+        self.register_buffer('phase', torch.exp(1j * kz * dz))
 
     def forward(self, E):
         # waves (batch, 200, 200)
@@ -33,8 +33,8 @@ class Lens(torch.nn.Module):
         coord_limit = (N_pixels//2)*pixel_size 
         mesh = np.arange(-coord_limit, coord_limit, pixel_size)
         x, y = np.meshgrid(mesh, mesh)    
-        self.phase = torch.tensor(np.exp(-1j*np.pi/(wl*2*focus) * (x**2 + y**2)))
-        self.amplitude = torch.zeros([N_pixels, N_pixels], dtype = torch.float32) + 1
+        self.register_buffer('phase', torch.tensor(np.exp(-1j*np.pi/(wl*2*focus) * (x**2 + y**2))))
+        self.register_buffer('amplitude', torch.zeros([N_pixels, N_pixels], dtype = torch.float32) + 1)
 
     def forward(self, E):
         return E * self.amplitude * self.phase
