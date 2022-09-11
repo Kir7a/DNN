@@ -100,19 +100,19 @@ class Trainer():
             hist['test loss'].append(ep_loss /len(testloader))
             hist['test accuracy'].append(correct /total)
         
-        if hist['test accuracy'][-1]>best_acc:
-            best_acc = hist['test accuracy']
-            best_model=deepcopy(self.model)
+            if hist['test accuracy'][-1]>best_acc:
+                best_acc = hist['test accuracy']
+                best_model=deepcopy(self.model)
 
-        print(f"Epoch={epoch} train loss={hist['train loss'][epoch]:.4}, test loss={hist['test loss'][epoch]:.4}")
-        print(f"train acc={hist['train accuracy'][epoch]:.4}, test acc={hist['test accuracy'][epoch]:.4}")
-        print("-----------------------")
+            print(f"Epoch={epoch} train loss={hist['train loss'][epoch]:.4}, test loss={hist['test loss'][epoch]:.4}")
+            print(f"train acc={hist['train accuracy'][epoch]:.4}, test acc={hist['test accuracy'][epoch]:.4}")
+            print("-----------------------")
         
         return hist, best_model
 
 class MaskLayer(torch.nn.Module):
 
-    def __init__(self, distance_before_mask = None, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, include_amplitude = False):
+    def __init__(self, distance_before_mask = None, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, include_amplitude = False, n = None):
         super(MaskLayer, self).__init__()
 
         self.diffractive_layer = None
@@ -120,12 +120,13 @@ class MaskLayer(torch.nn.Module):
             self.diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, distance_before_mask)
 
         self.phase = torch.nn.Parameter(torch.zeros([N_pixels, N_pixels], dtype = torch.float32))
-        if include_amplitude:
+        if (include_amplitude and (n is None)):
             self.amplitude = torch.nn.Parameter(torch.zeros([N_pixels, N_pixels], dtype = torch.float32) + 1)
         self.phase_amp_mod = include_amplitude
         self.N_pixels = N_pixels
         self.pixel_size = pixel_size
         self.wl = wl
+        self.n = n
 
     def forward(self, E):
         out = E
@@ -134,12 +135,18 @@ class MaskLayer(torch.nn.Module):
         constr_phase = 2*np.pi*torch.sigmoid(self.phase)
         modulation = torch.cos(constr_phase)+1j*torch.sin(constr_phase)
         if self.phase_amp_mod:
-            constr_amp = F.relu(self.amplitude)/F.relu(self.amplitude).max()
+            if self.n is None:
+                constr_amp = F.relu(self.amplitude)/F.relu(self.amplitude).max()
+            else:
+                constr_amp = np.exp(- np.imag(self.n) * self.calc_thickness())
             modulation = constr_amp * modulation
         out = modulation * out
         return out
 
-
+    def calc_thickness(self):
+        constr_phase = 2*np.pi*torch.sigmoid(self.phase)
+        thickness = self.wl * constr_phase / ( 2 * np.pi * np.real(self.n))
+        return thickness
 
 class DNN(torch.nn.Module):
     """
