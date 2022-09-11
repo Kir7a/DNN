@@ -101,7 +101,7 @@ class Trainer():
             hist['test accuracy'].append(correct /total)
         
             if hist['test accuracy'][-1]>best_acc:
-                best_acc = hist['test accuracy']
+                best_acc = hist['test accuracy'][-1]
                 best_model=deepcopy(self.model)
 
             print(f"Epoch={epoch} train loss={hist['train loss'][epoch]:.4}, test loss={hist['test loss'][epoch]:.4}")
@@ -111,8 +111,18 @@ class Trainer():
         return hist, best_model
 
 class MaskLayer(torch.nn.Module):
-
+    '''
+    Класс для амплитудно-фазовой маски
+    '''
     def __init__(self, distance_before_mask = None, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, include_amplitude = False, n = None):
+        '''
+        :param distance_before_mask: расстояние, которое проходит излучение до маски
+        :param wl: длина волны излучения
+        :param N_pixels: число пикселей в маске
+        :param pixel_size: размер одного пикселя
+        :param include_amplitude: применять ли амплитудную модуляцию
+        :param n: комплексный показатель преломления
+        '''
         super(MaskLayer, self).__init__()
 
         self.diffractive_layer = None
@@ -144,7 +154,10 @@ class MaskLayer(torch.nn.Module):
         return out
 
     def calc_thickness(self):
-        constr_phase = 2*np.pi*torch.sigmoid(self.phase)
+        '''
+        Вычисление толщины, соответствующей набегу фаз в маске
+        '''
+        constr_phase = 2 * np.pi * torch.sigmoid(self.phase)
         thickness = self.wl * constr_phase / ( 2 * np.pi * np.real(self.n))
         return thickness
 
@@ -229,7 +242,7 @@ class new_Fourier_DNN(torch.nn.Module):
     """
     Fourier Diffractive Neural Network
     """
-    def __init__(self, num_layers=5, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, distance = 0.01, lens_focus = 10e-2):
+    def __init__(self, num_layers = 5, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, distance = 0.01, lens_focus = 10e-2, dn = None):
 
         super(new_Fourier_DNN, self).__init__()
         self.lens_diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, lens_focus)
@@ -239,7 +252,8 @@ class new_Fourier_DNN(torch.nn.Module):
                                                           wl = wl, 
                                                           N_pixels = N_pixels, 
                                                           pixel_size = pixel_size, 
-                                                          include_amplitude = True) for _ in range(0,num_layers)])
+                                                          include_amplitude = True,
+                                                          n = dn) for _ in range(0,num_layers)])
 
     def forward(self, E):
         outputs = []
