@@ -1,4 +1,3 @@
-from turtle import forward
 import torch
 import numpy as np
 import torch.nn.functional as F
@@ -104,7 +103,7 @@ class Trainer():
                 best_acc = hist['test accuracy'][-1]
                 best_model=deepcopy(self.model)
 
-            print(f"Epoch={epoch} train loss={hist['train loss'][epoch]:.4}, test loss={hist['test loss'][epoch]:.4}")
+            print(f"Epoch={epoch+1} train loss={hist['train loss'][epoch]:.4}, test loss={hist['test loss'][epoch]:.4}")
             print(f"train acc={hist['train accuracy'][epoch]:.4}, test acc={hist['test accuracy'][epoch]:.4}")
             print("-----------------------")
         
@@ -148,7 +147,7 @@ class MaskLayer(torch.nn.Module):
             if self.n is None:
                 constr_amp = F.relu(self.amplitude)/F.relu(self.amplitude).max()
             else:
-                constr_amp = np.exp(- np.imag(self.n) * self.calc_thickness())
+                constr_amp = torch.exp(- np.imag(self.n) * 2 * np.pi / self.wl * self.calc_thickness())
             modulation = constr_amp * modulation
         out = modulation * out
         return out
@@ -242,7 +241,15 @@ class new_Fourier_DNN(torch.nn.Module):
     """
     Fourier Diffractive Neural Network
     """
-    def __init__(self, num_layers = 5, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, distance = 0.01, lens_focus = 10e-2, dn = None):
+    def __init__(self, 
+                 num_layers = 5, 
+                 wl = 532e-9, 
+                 N_pixels = 400, 
+                 pixel_size = 20e-6, 
+                 distance = 0.01, 
+                 lens_focus = 10e-2, 
+                 include_amplitude_modulation = False, 
+                 dn = None):
 
         super(new_Fourier_DNN, self).__init__()
         self.lens_diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, lens_focus)
@@ -252,7 +259,7 @@ class new_Fourier_DNN(torch.nn.Module):
                                                           wl = wl, 
                                                           N_pixels = N_pixels, 
                                                           pixel_size = pixel_size, 
-                                                          include_amplitude = True,
+                                                          include_amplitude = include_amplitude_modulation,
                                                           n = dn) for _ in range(0,num_layers)])
 
     def forward(self, E):
