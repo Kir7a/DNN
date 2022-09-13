@@ -147,17 +147,18 @@ class MaskLayer(torch.nn.Module):
             if self.n is None:
                 constr_amp = F.relu(self.amplitude)/F.relu(self.amplitude).max()
             else:
-                constr_amp = torch.exp(- np.imag(self.n) * 2 * np.pi / self.wl * self.calc_thickness())
+                constr_amp = torch.exp(- np.imag(self.n) * 2 * np.pi / self.wl * self.calc_thickness(constr_phase))
             modulation = constr_amp * modulation
         out = modulation * out
         return out
 
-    def calc_thickness(self):
+    def calc_thickness(self, phase = None):
         '''
         Вычисление толщины, соответствующей набегу фаз в маске
         '''
-        constr_phase = 2 * np.pi * torch.sigmoid(self.phase)
-        thickness = self.wl * constr_phase / ( 2 * np.pi * np.real(self.n))
+        if phase is None:
+            phase = 2 * np.pi * torch.sigmoid(self.phase)
+        thickness = self.wl * phase / ( 2 * np.pi * np.real(self.n))
         return thickness
 
 class DNN(torch.nn.Module):
@@ -244,16 +245,17 @@ class new_Fourier_DNN(torch.nn.Module):
     def __init__(self, 
                  num_layers = 5, 
                  wl = 532e-9, 
-                 N_pixels = 400, 
-                 pixel_size = 20e-6, 
-                 distance = 0.01, 
-                 lens_focus = 10e-2, 
-                 include_amplitude_modulation = False, 
+                 N_pixels = 200, 
+                 pixel_size = 10e-6, 
+                 distance = 5e-3, 
+                 lens_focus = 100e-3, 
+                 include_amplitude_modulation = True, 
                  dn = None):
 
         super(new_Fourier_DNN, self).__init__()
         self.lens_diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, lens_focus)
         self.lens = Lens(lens_focus, wl, N_pixels, pixel_size)
+        self.first_diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, lens_focus - distance)
 
         self.mask_layers = torch.nn.ModuleList([MaskLayer(distance_before_mask = distance, 
                                                           wl = wl, 
@@ -267,6 +269,7 @@ class new_Fourier_DNN(torch.nn.Module):
         outputs.append(E)
         E = self.lens_diffractive_layer(E)
         E = self.lens(E)
+        E = self.first_diffractive_layer(E)
         outputs.append(E)
         for layer in self.mask_layers:
             E = layer(E)

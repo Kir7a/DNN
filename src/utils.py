@@ -1,8 +1,5 @@
 from itertools import chain
 import torch
-import torch.nn.functional as F
-from tqdm import tqdm
-from copy import deepcopy
 
 
 def generate_det_row(det_size, start_pos_x, start_pos_y, det_step, N_det):
