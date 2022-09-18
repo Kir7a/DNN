@@ -281,6 +281,10 @@ class new_Fourier_DNN(torch.nn.Module):
         E_abs = torch.abs(E)**2
         return E_abs, outputs
 
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
 
 
 
