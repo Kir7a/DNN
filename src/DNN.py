@@ -108,6 +108,23 @@ class Trainer():
             print("-----------------------")
         
         return hist, best_model
+    
+    def validate(self, dataloader, unconstrain_phase = False):
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for images, labels in tqdm(dataloader):
+                images=images.to(self.device)
+                images = F.pad(torch.squeeze(images), pad=(self.padding, self.padding, self.padding, self.padding))
+                labels=labels.to(self.device)
+                
+                out_img, _ = self.model(images, unconstrain_phase)
+            
+                out_label = self.detector_region(out_img)
+                _, predicted = torch.max(out_label.data, 1)
+                correct += (predicted == labels).sum().item()
+                total += labels.size(0)
+        return correct/total
 
 class MaskLayer(torch.nn.Module):
     '''
@@ -137,11 +154,14 @@ class MaskLayer(torch.nn.Module):
         self.wl = wl
         self.n = n
 
-    def forward(self, E):
+    def forward(self, E, unconstain_phase = False):
         out = E
         if self.diffractive_layer is not None:
             out = self.diffractive_layer(out)
-        constr_phase = 2*np.pi*torch.sigmoid(self.phase)
+        if unconstain_phase:
+            constr_phase = self.phase
+        else:
+            constr_phase = 2*np.pi*torch.sigmoid(self.phase)
         modulation = torch.cos(constr_phase)+1j*torch.sin(constr_phase)
         if self.phase_amp_mod:
             if self.n is None:
@@ -264,7 +284,7 @@ class new_Fourier_DNN(torch.nn.Module):
                                                           include_amplitude = include_amplitude_modulation,
                                                           n = dn) for _ in range(0,num_layers)])
 
-    def forward(self, E):
+    def forward(self, E, unconstain_phase = False):
         outputs = []
         outputs.append(E)
         E = self.lens_diffractive_layer(E)
@@ -272,7 +292,7 @@ class new_Fourier_DNN(torch.nn.Module):
         E = self.first_diffractive_layer(E)
         outputs.append(E)
         for layer in self.mask_layers:
-            E = layer(E)
+            E = layer(E, unconstain_phase)
             outputs.append(E)
         E = self.lens_diffractive_layer(E)
         E = self.lens(E)

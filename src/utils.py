@@ -5,7 +5,6 @@ import matplotlib.patches as patches
 import torch.nn.functional as F
 import numpy as np
 
-
 def generate_det_row(det_size, start_pos_x, start_pos_y, det_step, N_det):
   p = []
   for i in range(N_det):
@@ -55,21 +54,33 @@ def visualize(model, example, padding = 58):
   #plt.colorbar()
   plt.show()
 
-def mask_visualization(model):
+def mask_visualization(model, wl = None, n = None):
   plt.figure(figsize = (30, 4))
   for ind, mask in enumerate(model.mask_layers):
     plt.subplot(1, len(model.mask_layers), ind+1)
-    plt.imshow(torch.sigmoid(mask.phase.detach().cpu())*360, interpolation = 'none')
+    phase = torch.sigmoid(mask.phase.detach().cpu())
+    if wl is None:
+      plt.imshow(phase * 360, interpolation = 'none')
+      plt.colorbar(label = 'Phase, deg.')
+    else:
+      plt.imshow(phase * wl * 10**6 / n, interpolation = 'none')
+      plt.colorbar(label = 'Thickness, um')
     plt.title(f'Mask of layer {ind+1}')
-    plt.colorbar(label = 'Phase, deg.')
 
-def visualize_n_samples(model, dataset, n, padding = 58, detector_pos = None):
+def visualize_n_samples(model, 
+                        dataset, 
+                        n, 
+                        padding = 58, 
+                        detector_pos = None, 
+                        unconstain_phase = False,
+                        seed = 17):
   plt.figure(figsize = (25, 8))
+  np.random.seed(seed)
   rand_ind = np.random.choice(range(len(dataset)), size=n, replace=False)
   device = model.device
   for number, ind in enumerate(rand_ind):
     ex = F.pad(dataset[ind][0], pad=(padding, padding, padding, padding))
-    out, _ = model(ex.to(device))
+    out, _ = model(ex.to(device), unconstain_phase)
     plt.subplot(2, n, number+1)
     plt.imshow(ex[0], interpolation='none')
     plt.title(f'Input image with label {dataset[ind][1]}')
