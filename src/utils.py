@@ -16,20 +16,30 @@ def generate_det_row(det_size, start_pos_x, start_pos_y, det_step, N_det):
     p.append((up, down, left, right))
   return p
 
-def set_det_pos(det_size=20, start_pos_x = 46, start_pos_y = 46, step_multiplier = 1):
-  p = []
-  p.append(generate_det_row(det_size, start_pos_x, start_pos_y, 2 * step_multiplier * det_size, 3))
-  p.append(generate_det_row(det_size, start_pos_x, start_pos_y + 3 * det_size, 1 * step_multiplier * det_size, 4))
-  p.append(generate_det_row(det_size, start_pos_x, start_pos_y + 6 * det_size, 2 * step_multiplier * det_size, 3))
-  return list(chain.from_iterable(p))
+def set_det_pos(det_size=20, edge_x = 10, edge_y = 20, N_pixels = 200):
+    p = []
+    det_step_x_1 = (N_pixels - 2 * edge_x - 3 * det_size)//2
+    det_step_x_2 = (N_pixels - 2 * edge_x - 4 * det_size)//3
+    det_step_y = (N_pixels - 2 * edge_y - 3 * det_size)//2 + det_size
+    p.append(generate_det_row(det_size, edge_x, edge_y, det_step_x_1, 3))
+    p.append(generate_det_row(det_size, edge_x, edge_y + det_step_y, det_step_x_2, 4))
+    p.append(generate_det_row(det_size, edge_x, edge_y + 2 * det_step_y, det_step_x_1, 3))
+    return list(chain.from_iterable(p))
 
-def get_detector_imgs(detector_pos, N_pixels):
+def get_detector_imgs(det_size=20, edge_x = 10, edge_y = 20, N_pixels = 200, visualize = True):
+    detector_pos = set_det_pos(det_size, edge_x, edge_y, N_pixels)
     labels_image_tensors=torch.zeros((10,N_pixels,N_pixels), dtype = torch.double)
     for ind,pos in enumerate(detector_pos):
         pos_l, pos_r, pos_u, pos_d = pos
         labels_image_tensors[ind,pos_l+1:pos_r+1, pos_u+1:pos_d+1] = 1
         labels_image_tensors[ind] = labels_image_tensors[ind]
-    return labels_image_tensors
+    if visualize:
+      plt.imshow(np.zeros((N_pixels, N_pixels)))
+      for det in detector_pos:
+        rect = patches.Rectangle((det[2], det[0]), det_size, det_size, linewidth=1, edgecolor='r', facecolor='none')
+        plt.gca().add_patch(rect)
+      plt.show()
+    return labels_image_tensors, detector_pos
 
 def visualize(model, example, padding = 58):
   ex = F.pad(example[0], pad=(padding, padding, padding, padding))
