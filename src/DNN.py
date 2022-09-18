@@ -39,7 +39,7 @@ class Trainer():
             detectors_list.append((x[:, det_x0 : det_x1+1, det_y0 : det_y1+1].sum(dim=(1, 2))/full_int).unsqueeze(-1))
         return torch.cat(detectors_list, dim = 1)
 
-    def epoch_step(self, batch):
+    def epoch_step(self, batch, unconstrain_phase = False):
         '''
         Обработка одного батча в процессе тренировки.
         param batch: (imgs, labels) батч с изображениями и их метками
@@ -49,7 +49,7 @@ class Trainer():
         images = F.pad(torch.squeeze(images), pad=(self.padding, self.padding, self.padding, self.padding))
         labels=labels.to(self.device)
             
-        out_img, _ = self.model(images)
+        out_img, _ = self.model(images, unconstrain_phase)
         
         out_label = self.detector_region(out_img)
         _, predicted = torch.max(out_label.data, 1)
@@ -58,7 +58,13 @@ class Trainer():
         loss = self.loss_function(out_img, labels)
         return loss, correct, total
 
-    def train(self, loss_function, optimizer, trainloader, testloader, epochs =10):
+    def train(self, 
+              loss_function, 
+              optimizer, 
+              trainloader, 
+              testloader, 
+              epochs =10,
+              unconstrain_phase = False):
         '''
         Функция для тренировки сети.
         '''
@@ -74,7 +80,7 @@ class Trainer():
             correct = 0
             total = 0
             for batch in tqdm(trainloader):
-                loss, batch_correct, batch_total =  self.epoch_step(batch) 
+                loss, batch_correct, batch_total =  self.epoch_step(batch, unconstrain_phase) 
                 ep_loss += loss.item()
                 correct += batch_correct
                 total += batch_total
@@ -92,7 +98,7 @@ class Trainer():
             total = 0
             with torch.no_grad():
                 for batch in tqdm(testloader):
-                    loss, batch_correct, batch_total =  self.epoch_step(batch)
+                    loss, batch_correct, batch_total =  self.epoch_step(batch, unconstrain_phase)
                     ep_loss += loss.item()
                     correct += batch_correct
                     total += batch_total
