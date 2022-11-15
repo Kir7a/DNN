@@ -86,7 +86,7 @@ class Trainer():
             total = 0
             for batch in tqdm(trainloader):
                 # округление фазы при дискретной толщине слоёв маски
-                if discrete_thickness and model.mask_layers[0].n:
+                if discrete_thickness and self.model.mask_layers[0].n:
                     self.model.round_phase(discrete_thickness)
 
                 loss, batch_correct, batch_total = self.epoch_step(batch, unconstrain_phase)
@@ -266,8 +266,7 @@ class Fourier_DNN(torch.nn.Module):
 
     def forward(self, x):
         # x (batch, 200, 200)
-        outputs = []
-        outputs.append(x)
+        outputs = [x]
         # x = self.double_f_layer(x)
         x = self.single_f_layer(x)
         outputs.append(x)
