@@ -20,7 +20,7 @@ class DiffractiveLayer(torch.nn.Module):
         self.register_buffer('phase', torch.exp(1j * kz * dz))
 
     def forward(self, E):
-        # waves (batch, 200, 200)
+        # waves (batch, channels, 200, 200)
         fft_c = torch.fft.fft2(E)
         c = torch.fft.fftshift(fft_c)
         angular_spectrum = torch.fft.ifft2(torch.fft.ifftshift(c * self.phase))

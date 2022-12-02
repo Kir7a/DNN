@@ -50,7 +50,7 @@ class Trainer():
         """
         images, labels = batch
         images = images.to(self.device)
-        images = F.pad(torch.squeeze(images), pad=(self.padding, self.padding, self.padding, self.padding))
+        images = F.pad(images, pad=(self.padding, self.padding, self.padding, self.padding))
         labels = labels.to(self.device)
 
         out_img, _ = self.model(images, unconstrain_phase)
@@ -166,14 +166,19 @@ class MaskLayer(torch.nn.Module):
         if distance_before_mask is not None:
             self.diffractive_layer = DiffractiveLayer(wl, N_pixels, pixel_size, distance_before_mask)
 
-        self.phase = torch.nn.Parameter(torch.zeros([N_neurons, N_neurons], dtype=torch.float32))
+        wl_size = 1
+        try:
+            wl_size = len(wl)
+        except TypeError:
+            wl = [wl]
+        self.register_buffer('wl', torch.tensor(wl, dtype=torch.float32))
+        self.phase = torch.nn.Parameter(torch.zeros([wl_size, N_neurons, N_neurons], dtype=torch.float32))
         if include_amplitude and (n is None):
-            self.amplitude = torch.nn.Parameter(torch.zeros([N_neurons, N_neurons], dtype=torch.float32) + 1)
+            self.amplitude = torch.nn.Parameter(torch.zeros([wl_size, N_neurons, N_neurons], dtype=torch.float32) + 1)
         self.phase_amp_mod = include_amplitude
         self.N_pixels = N_pixels
         self.pixel_size = pixel_size
         self.N_neurons = N_neurons
-        self.wl = wl
         self.n = n
 
     def forward(self, E, unconstrain_phase=False):
@@ -189,11 +194,11 @@ class MaskLayer(torch.nn.Module):
             if self.n is None:
                 constr_amp = F.relu(self.amplitude) / F.relu(self.amplitude).max()
             else:
-                constr_amp = torch.exp(- np.imag(self.n) * 2 * np.pi / self.wl * self.calc_thickness(
+                constr_amp = torch.exp(- np.imag(self.n) * 2 * np.pi / self.wl[:, None, None] * self.calc_thickness(
                     constr_phase))
             modulation = constr_amp * modulation
-        modulation = transforms.functional.resize(modulation[None, :, :], self.N_pixels,
-                                                  transforms.InterpolationMode.NEAREST).squeeze()
+        modulation = transforms.functional.resize(modulation, self.N_pixels,
+                                                  transforms.InterpolationMode.NEAREST)
         out = modulation * out
         return out
 
@@ -203,8 +208,9 @@ class MaskLayer(torch.nn.Module):
         """
         if phase is None:
             phase = 2 * np.pi * torch.sigmoid(self.phase)
-        thickness = self.wl * phase / (2 * np.pi * np.real(self.n))
+        thickness = self.wl[:, None, None] * phase / (2 * np.pi * np.real(self.n))
         return thickness
+
 
 class DNN(torch.nn.Module):
     """
@@ -333,7 +339,7 @@ class new_Fourier_DNN(torch.nn.Module):
         outputs.append(E)
         E = self.lens_diffractive_layer(E)
         E_abs = torch.abs(E) ** 2
-        return E_abs, outputs
+        return E_abs.sum(dim=1), outputs
 
     def round_phase(self, thick_discr):
         phase_discr = np.real(self.mask_layers[0].n) * thick_discr * 2 * np.pi / self.mask_layers[0].wl
