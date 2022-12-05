@@ -47,7 +47,7 @@ def visualize(model, example, padding = 58):
   plt.subplot(1,2,1)
   plt.imshow(ex[0], interpolation='none')
   plt.title(f'Input image with label {example[1]}')
-  output_image = out.detach().cpu()[0]
+  output_image = out.detach().cpu()
   plt.subplot(1,2,2)
   plt.imshow(output_image, interpolation='none')
   plt.title(f'Output image')
@@ -55,23 +55,25 @@ def visualize(model, example, padding = 58):
   plt.show()
 
 def mask_visualization(model, wl = None, n = None):
-  plt.figure(figsize = (30, 4))
-  for ind, mask in enumerate(model.mask_layers):
-    plt.subplot(1, len(model.mask_layers), ind+1)
+  plt.figure(figsize = (20, 30))
+  for i, mask in enumerate(model.mask_layers):
     phase = torch.sigmoid(mask.phase.detach().cpu())
-    if wl is None:
-      plt.imshow(phase * 360, interpolation = 'none')
-      plt.colorbar(label = 'Phase, deg.')
-    else:
-      plt.imshow(phase * wl * 10**6 / n, interpolation = 'none')
-      plt.colorbar(label = 'Thickness, um')
-    plt.title(f'Mask of layer {ind+1}')
+    n_wl = phase.shape[0]
+    for j in range(n_wl):
+        plt.subplot(len(model.mask_layers), n_wl, (j+1)+i*n_wl)
+        if wl is None:
+            plt.imshow(phase[j,:,:] * 360, interpolation = 'none')
+            plt.colorbar(label = 'Phase, deg.')
+        else:
+            plt.imshow(phase[j,:,:] * wl * 10**6 / n, interpolation = 'none')
+            plt.colorbar(label = 'Thickness, um')
+        plt.title(f'Mask {j+1} of layer {i+1}')
 
-def visualize_n_samples(model, 
-                        dataset, 
-                        n, 
-                        padding = 58, 
-                        detector_pos = None, 
+def visualize_n_samples(model,
+                        dataset,
+                        n,
+                        padding = 58,
+                        detector_pos = None,
                         unconstain_phase = False,
                         seed = 17):
   plt.figure(figsize = (25, 8))
@@ -80,11 +82,11 @@ def visualize_n_samples(model,
   device = model.device
   for number, ind in enumerate(rand_ind):
     ex = F.pad(dataset[ind][0], pad=(padding, padding, padding, padding))
-    out, _ = model(ex.to(device), unconstain_phase)
+    out, _ = model(ex[None,:,:,:].to(device), unconstain_phase)
     plt.subplot(2, n, number+1)
     plt.imshow(ex[0], interpolation='none')
     plt.title(f'Input image with label {dataset[ind][1]}')
-    output_image = out.detach().cpu()[0]
+    output_image = out[0].detach().cpu()
     plt.subplot(2, n, n + number + 1)
     plt.imshow(output_image, interpolation='none')
     if detector_pos is not None:
