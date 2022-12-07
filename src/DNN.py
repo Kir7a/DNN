@@ -181,7 +181,7 @@ class MaskLayer(torch.nn.Module):
             n = [n]
         finally:
             if n_size == wl_size or n_size == 1:
-                self.register_buffer('n', torch.tensor(n, dtype=torch.complex32))
+                self.register_buffer('n', torch.tensor(n, dtype=torch.complex64))
             else:
                 raise Exception("Numbers of wl does not match number of n")
 
@@ -355,10 +355,10 @@ class new_Fourier_DNN(torch.nn.Module):
         return E_abs.sum(dim=1), outputs
 
     def round_phase(self, thick_discr):
-        phase_discr = np.real(self.mask_layers[0].n) * thick_discr * 2 * np.pi / self.mask_layers[0].wl
+        phase_discr = (self.mask_layers[0].n.real) * thick_discr * 2 * np.pi / self.mask_layers[0].wl
         with torch.no_grad():
             for name, param in self.named_parameters():
-                param = torch.round(param.clone().detach() / phase_discr) * phase_discr
+                param.copy_(torch.round(param.clone().detach() / phase_discr[:,None,None]) * phase_discr[:,None,None])
 
     @property
     def device(self):
