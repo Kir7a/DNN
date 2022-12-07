@@ -153,12 +153,12 @@ class MaskLayer(torch.nn.Module):
                  include_amplitude=False, n=None):
         """
         :param distance_before_mask: расстояние, которое проходит излучение до маски
-        :param wl: длина волны излучения
+        :param wl: длина волны излучения, для многоканальных изображений может быть задана списком соответствующей длины
         :param N_pixels: число пикселей в изображении
         :param pixel_size: размер одного пикселя
         :param N_neurons: число нейронов (пикселей в маске)
         :param include_amplitude: применять ли амплитудную модуляцию
-        :param n: комплексный показатель преломления
+        :param n: комплексный показатель преломления, для многоканальных изображений - список, len(n) = len(wl)
         """
         super(MaskLayer, self).__init__()
 
@@ -171,7 +171,20 @@ class MaskLayer(torch.nn.Module):
             wl_size = len(wl)
         except TypeError:
             wl = [wl]
-        self.register_buffer('wl', torch.tensor(wl, dtype=torch.float32))
+        finally:
+            self.register_buffer('wl', torch.tensor(wl, dtype=torch.float32))
+
+        n_size = 1
+        try:
+            n_size = len(n)
+        except TypeError:
+            n = [n]
+        finally:
+            if n_size == wl_size or n_size == 1:
+                self.register_buffer('n', torch.tensor(n, dtype=torch.complex32))
+            else:
+                raise Exception("Numbers of wl does not match number of n")
+
         self.phase = torch.nn.Parameter(torch.zeros([wl_size, N_neurons, N_neurons], dtype=torch.float32))
         if include_amplitude and (n is None):
             self.amplitude = torch.nn.Parameter(torch.zeros([wl_size, N_neurons, N_neurons], dtype=torch.float32) + 1)
@@ -179,7 +192,7 @@ class MaskLayer(torch.nn.Module):
         self.N_pixels = N_pixels
         self.pixel_size = pixel_size
         self.N_neurons = N_neurons
-        self.n = n
+        # self.n = n
 
     def forward(self, E, unconstrain_phase=False):
         out = E
@@ -194,7 +207,7 @@ class MaskLayer(torch.nn.Module):
             if self.n is None:
                 constr_amp = F.relu(self.amplitude) / F.relu(self.amplitude).max()
             else:
-                constr_amp = torch.exp(- np.imag(self.n) * 2 * np.pi / self.wl[:, None, None] * self.calc_thickness(
+                constr_amp = torch.exp(- np.imag(self.n[:, None, None]) * 2 * np.pi / self.wl[:, None, None] * self.calc_thickness(
                     constr_phase))
             modulation = constr_amp * modulation
         modulation = transforms.functional.resize(modulation, self.N_pixels,
@@ -208,7 +221,7 @@ class MaskLayer(torch.nn.Module):
         """
         if phase is None:
             phase = 2 * np.pi * torch.sigmoid(self.phase)
-        thickness = self.wl[:, None, None] * phase / (2 * np.pi * np.real(self.n))
+        thickness = self.wl[:, None, None] * phase / (2 * np.pi * np.real(self.n[:, None, None]))
         return thickness
 
 
