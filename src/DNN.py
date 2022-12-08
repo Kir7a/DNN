@@ -207,11 +207,12 @@ class MaskLayer(torch.nn.Module):
             if self.n is None:
                 constr_amp = F.relu(self.amplitude) / F.relu(self.amplitude).max()
             else:
-                constr_amp = torch.exp(- np.imag(self.n[:, None, None]) * 2 * np.pi / self.wl[:, None, None] * self.calc_thickness(
-                    constr_phase))
+                constr_amp = torch.exp(
+                    - np.imag(self.n[:, None, None]) * 2 * np.pi / self.wl[:, None, None] * self.calc_thickness(
+                        constr_phase))
             modulation = constr_amp * modulation
-        modulation = transforms.functional.resize(modulation, self.N_pixels,
-                                                  transforms.InterpolationMode.NEAREST)
+        modulation = transforms.functional.resize(modulation.real, self.N_pixels, transforms.InterpolationMode.NEAREST)\
+            + 1j * transforms.functional.resize(modulation.imag, self.N_pixels, transforms.InterpolationMode.NEAREST)
         out = modulation * out
         return out
 
@@ -358,7 +359,8 @@ class new_Fourier_DNN(torch.nn.Module):
         phase_discr = (self.mask_layers[0].n.real) * thick_discr * 2 * np.pi / self.mask_layers[0].wl
         with torch.no_grad():
             for name, param in self.named_parameters():
-                param.copy_(torch.round(param.clone().detach() / phase_discr[:,None,None]) * phase_discr[:,None,None])
+                param.copy_(
+                    torch.round(param.clone().detach() / phase_discr[:, None, None]) * phase_discr[:, None, None])
 
     @property
     def device(self):
