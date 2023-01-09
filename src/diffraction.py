@@ -4,14 +4,15 @@ import torch
 
 class DiffractiveLayer(torch.nn.Module):
 
-    def __init__(self, λ = 532e-9, N_pixels = 400, pixel_size = 20e-6, dz = 0.01):
+    def __init__(self, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6, dz = 0.01):
         super(DiffractiveLayer, self).__init__()
-
+        # wl can be an integer or a list for images with multiple channels
+        wl_array = np.array(wl).reshape(-1,1,1)
         fx = np.fft.fftshift(np.fft.fftfreq(N_pixels, d = pixel_size))
         fy = np.fft.fftshift(np.fft.fftfreq(N_pixels, d = pixel_size))
         fxx, fyy = np.meshgrid(fx, fy)
 
-        argument = (2 * np.pi)**2 * ((1. / λ) ** 2 - fxx ** 2 - fyy ** 2)
+        argument = (2 * np.pi)**2 * ((1. / wl_array) ** 2 - fxx ** 2 - fyy ** 2)
 
         #Calculate the propagating and the evanescent (complex) modes
         tmp = np.sqrt(np.abs(argument))
@@ -19,7 +20,7 @@ class DiffractiveLayer(torch.nn.Module):
         self.register_buffer('phase', torch.exp(1j * kz * dz))
 
     def forward(self, E):
-        # waves (batch, 200, 200)
+        # waves (batch, channels, 200, 200)
         fft_c = torch.fft.fft2(E)
         c = torch.fft.fftshift(fft_c)
         angular_spectrum = torch.fft.ifft2(torch.fft.ifftshift(c * self.phase))
@@ -29,11 +30,11 @@ class Lens(torch.nn.Module):
 
     def __init__(self, focus, wl = 532e-9, N_pixels = 400, pixel_size = 20e-6):
         super(Lens, self).__init__()
-
-        coord_limit = (N_pixels//2)*pixel_size 
+        wl_array = np.array(wl).reshape(-1,1,1)
+        coord_limit = (N_pixels//2)*pixel_size
         mesh = np.arange(-coord_limit, coord_limit, pixel_size)
-        x, y = np.meshgrid(mesh, mesh)    
-        self.register_buffer('phase', torch.tensor(np.exp(-1j*np.pi/(wl*2*focus) * (x**2 + y**2))))
+        x, y = np.meshgrid(mesh, mesh)
+        self.register_buffer('phase', torch.tensor(np.exp(-1j*np.pi/(wl_array*2*focus) * (x**2 + y**2))))
         self.register_buffer('amplitude', torch.zeros([N_pixels, N_pixels], dtype = torch.float32) + 1)
 
     def forward(self, E):
